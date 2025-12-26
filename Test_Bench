@@ -1,0 +1,122 @@
+`timescale 1ns/1ps
+
+module utb;
+
+  reg        reset;
+  reg        txclk;
+  reg        ld_tx_data;
+  reg [7:0]  tx_data;
+  reg        tx_enable;
+  wire       tx_out;
+  wire       tx_empty;
+
+  reg        rxclk;
+  reg        uld_rx_data;
+  wire [7:0] rx_data;
+  reg        rx_enable;
+  wire       rx_empty;
+
+  // Loopback
+  reg  rx_force_en;
+  reg  rx_force_val;
+  wire rx_in;
+
+  assign rx_in = (rx_force_en) ? rx_force_val : tx_out;
+
+  uart #(.CLKS_PER_BIT(64)) uut (
+    .reset       (reset),
+    .txclk       (txclk),
+    .ld_tx_data  (ld_tx_data),
+    .tx_data     (tx_data),
+    .tx_enable   (tx_enable),
+    .tx_out      (tx_out),
+    .tx_empty    (tx_empty),
+    .rxclk       (rxclk),
+    .uld_rx_data (uld_rx_data),
+    .rx_data     (rx_data),
+    .rx_enable   (rx_enable),
+    .rx_in       (rx_in),
+    .rx_empty    (rx_empty)
+  );
+
+  // Same clocks
+  always #5 txclk = ~txclk;
+  always #5 rxclk = ~rxclk;
+
+  // FIXED: Wait for tx_empty before sending next byte
+  task send_byte;
+    input [7:0] b;
+    begin
+      wait (tx_empty == 1'b1);
+      @(posedge txclk);
+      tx_data    = b;
+      ld_tx_data = 1'b1;
+      @(posedge txclk);
+      ld_tx_data = 1'b0;
+    end
+  endtask
+
+  task expect_rx_byte;
+    input [7:0] exp;
+    begin
+      wait (rx_empty == 1'b0);
+      @(posedge rxclk);
+
+      if (rx_data !== exp)
+        $display("[%0t] FAIL: expected 0x%02h got 0x%02h", $time, exp, rx_data);
+      else
+        $display("[%0t] PASS: got 0x%02h", $time, rx_data);
+
+      uld_rx_data = 1'b1;
+      @(posedge rxclk);
+      uld_rx_data = 1'b0;
+    end
+  endtask
+
+  initial begin
+    reset       = 1'b1;
+    txclk       = 1'b0;
+    ld_tx_data  = 1'b0;
+    tx_data     = 8'h00;
+    tx_enable   = 1'b0;
+
+    rxclk       = 1'b0;
+    uld_rx_data = 1'b0;
+    rx_enable   = 1'b0;
+
+    rx_force_en  = 1'b0;
+    rx_force_val = 1'b0;
+
+    #50;
+    reset = 1'b0;
+
+    @(posedge txclk);
+    tx_enable = 1'b1;
+
+    // enable RX slightly later
+    #500;
+    rx_enable = 1'b1;
+
+    // Test 1: 'A'
+    send_byte(8'h41);
+    expect_rx_byte(8'h41);
+
+    // Test 2: "Hello"
+    send_byte(8'h48);
+    send_byte(8'h65);
+    send_byte(8'h6C);
+    send_byte(8'h6C);
+    send_byte(8'h6F);
+
+    expect_rx_byte(8'h48);
+    expect_rx_byte(8'h65);
+    expect_rx_byte(8'h6C);
+    expect_rx_byte(8'h6C);
+    expect_rx_byte(8'h6F);
+
+    #20000;
+    $display("[%0t] Simulation finished.", $time);
+    $finish;
+  end
+
+endmodule
