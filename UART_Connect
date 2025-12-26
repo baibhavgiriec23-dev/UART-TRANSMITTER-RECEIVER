@@ -1,0 +1,72 @@
+`timescale 1ns/1ps
+
+module uart
+(
+  input        reset,
+
+  input        txclk,
+  input        ld_tx_data,
+  input  [7:0] tx_data,
+  input        tx_enable,
+  output       tx_out,
+  output       tx_empty,
+
+  input        rxclk,
+  input        uld_rx_data,
+  output [7:0] rx_data,
+  input        rx_enable,
+  input        rx_in,
+  output       rx_empty
+);
+
+  parameter CLKS_PER_BIT = 64;
+
+  // TX
+  wire tx_active;
+  wire tx_done;
+
+  UART_TX #(.CLKS_PER_BIT(CLKS_PER_BIT)) U_TX (
+    .i_Clock    (txclk),
+    .i_Tx_DV    (tx_enable & ld_tx_data),
+    .i_Tx_Byte  (tx_data),
+    .o_Tx_Active(tx_active),
+    .o_Tx_Serial(tx_out),
+    .o_Tx_Done  (tx_done)
+  );
+
+  assign tx_empty = ~tx_active;
+
+  // RX
+  wire       rx_dv;
+  wire [7:0] rx_byte;
+
+  UART_RX #(.CLKS_PER_BIT(CLKS_PER_BIT)) U_RX (
+    .i_Clock    (rxclk),
+    .i_Rx_Serial(rx_enable ? rx_in : 1'b1),
+    .o_Rx_DV    (rx_dv),
+    .o_Rx_Byte  (rx_byte)
+  );
+
+  // 1-byte buffer
+  reg [7:0] rx_hold;
+  reg       rx_full;
+
+  always @(posedge rxclk) begin
+    if (reset) begin
+      rx_hold <= 8'h00;
+      rx_full <= 1'b0;
+    end else begin
+      if (rx_dv) begin
+        rx_hold <= rx_byte;
+        rx_full <= 1'b1;
+      end
+      if (uld_rx_data) begin
+        rx_full <= 1'b0;
+      end
+    end
+  end
+
+  assign rx_data  = rx_hold;
+  assign rx_empty = ~rx_full;
+
+endmodule
